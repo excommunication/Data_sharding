@@ -1,0 +1,63 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: store_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d store_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: src/auth-service/service/Dockerfile
+    image: shard-auth-service
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/auth_db
+      DB_USER: admin
+      DB_PASSWORD: admin
+      SECRET: ${SECRET:-local-dev-secret-key-change-me-0123456789abcdef}
+      EXPIRATION_TIME: ${EXPIRATION_TIME:-900000}
+      CLIENT_ID: ${CLIENT_ID:-local-dev-client-id}
+      CLIENT_SECRET: ${CLIENT_SECRET:-local-dev-client-secret}
+    ports:
+      - "9090:9090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  store:
+    build:
+      context: .
+      dockerfile: src/store/Dockerfile
+    image: shard-store
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/store_db
+      DB_USERNAME: admin
+      DB_PASSWORD: admin
+      AUTH_GRPC_ADDRESS: auth-service:9090
+      CLIENT_ID: ${CLIENT_ID:-local-dev-client-id}
+      CLIENT_SECRET: ${CLIENT_SECRET:-local-dev-client-secret}
+      REDIRECT_URI: ${REDIRECT_URI:-http://localhost:8080/api/v1/auth/login/google/callback}
+    ports:
+      - "8080:8080"
+    volumes:
+      - store-logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+
+volumes:
+  postgres-data:
+  store-logs:
